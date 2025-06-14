@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tempHeizVorlauf: document.getElementById('tempHeizVorlauf'), tempHeizRuecklauf: document.getElementById('tempHeizRuecklauf'),
         tempKuehlVorlauf: document.getElementById('tempKuehlVorlauf'), tempKuehlRuecklauf: document.getElementById('tempKuehlRuecklauf'),
         preisKaelte: document.getElementById('preisKaelte'),
+        kaelteBasisInputs: document.querySelectorAll('input[name="kaeltebasis"]'),
     };
 
     const TOLERANCE = 0.01; const CP_WASSER = 4.186; const RHO_WASSER = 1000;
@@ -76,7 +77,6 @@ document.addEventListener('DOMContentLoaded', () => {
         let operations = { ve: {p:0, wv:0}, k: {p:0, kondensat:0, wv:0}, ne: {p:0, wv:0} };
         
         let currentState = states[0];
-
         if (currentState.t < inputs.tempVorerhitzerSoll) {
             const hNach = getH(inputs.tempVorerhitzerSoll, currentState.x);
             operations.ve.p = massenstrom_kg_s * (hNach - currentState.h);
@@ -127,12 +127,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderAll(states, operations, inputs) {
-        let colors = ['color-green', '', '', '', ''];
+        let colors = ['color-green', '', '', ''];
         colors[1] = operations.ve.p > 0 ? 'color-red' : colors[0];
         colors[2] = operations.k.p > 0 ? 'color-blue' : colors[1];
         colors[3] = operations.ne.p > 0 ? 'color-red' : colors[2];
-        colors[4] = colors[3];
         
+        const finalColor = states[3].t < states[0].t - TOLERANCE ? 'color-blue' : (states[3].t > states[0].t + TOLERANCE ? 'color-red' : 'color-green');
+
         updateStateNode(dom.nodes[0], states[0], colors[0]);
         updateComponentNode(dom.compVE, operations.ve.p, -1, operations.ve.wv);
         updateStateNode(dom.nodes[1], states[1], colors[1]);
@@ -140,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStateNode(dom.nodes[2], states[2], colors[2]);
         updateComponentNode(dom.compNE, operations.ne.p, -1, operations.ne.wv);
         updateStateNode(dom.nodes[3], states[3], colors[3]);
-        updateStateNode(dom.nodes[4], states[3], colors[4]);
+        updateStateNode(dom.nodes[4], states[3], finalColor);
 
         const activeSteps = Object.values(operations).filter(op => op.p > 0);
         let overviewClass = 'process-success';
@@ -183,21 +184,15 @@ document.addEventListener('DOMContentLoaded', () => {
             dom.rhAenderung.textContent = `${deltaRh >= 0 ? '+' : ''}${deltaRh.toFixed(1)} %`;
             const deltaVol = inputs.volumenstrom - referenceState.vol;
             dom.volumenAenderung.textContent = `${deltaVol >= 0 ? '+' : ''}${deltaVol.toFixed(0)} m³/h`;
-        } else {
-            dom.kostenAenderung.textContent = '--'; dom.tempAenderung.textContent = '--';
-            dom.rhAenderung.textContent = '--'; dom.volumenAenderung.textContent = '--';
-            dom.kostenAenderung.className = 'cost-value';
         }
     }
     
-    function updateStateNode(nodeWrapper, state, colorClass) {
-        nodeWrapper.className = 'state-node';
-        if (colorClass) nodeWrapper.classList.add(colorClass);
-        const parentComp = nodeWrapper.previousElementSibling?.previousElementSibling;
-        if(parentComp && parentComp.classList.contains('inactive')) nodeWrapper.classList.add('inactive');
-        if(nodeWrapper.id === 'node-final') nodeWrapper.classList.add('final-state');
+    function updateStateNode(node, state, colorClass) {
+        node.className = 'state-node';
+        if (colorClass) node.classList.add(colorClass);
+        if(node.id.includes('final')) node.classList.add('final-state');
         
-        const spans = nodeWrapper.querySelectorAll('span');
+        const spans = node.querySelectorAll('span');
         spans[0].textContent = state.t.toFixed(1);
         spans[1].textContent = state.rh.toFixed(1);
         spans[2].textContent = state.x.toFixed(2);
@@ -231,6 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dom.tempHeizVorlauf.value = 70; dom.tempHeizRuecklauf.value = 50;
         dom.tempKuehlVorlauf.value = 8; dom.tempKuehlRuecklauf.value = 13;
         
+        updateCostDependencies('strom_eer');
         syncAllSlidersToInputs();
         handleKuehlerToggle();
         calculateAll();
@@ -253,6 +249,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function syncAllSlidersToInputs(){
+        const tempVal = parseFloat(dom.tempZuluft.value);
+        if(!isNaN(tempVal)) {
+            dom.tempZuluftSlider.min = tempVal - 6;
+            dom.tempZuluftSlider.max = tempVal + 6;
+        }
+        const volVal = parseFloat(dom.volumenstrom.value);
+        if(!isNaN(volVal)) {
+            dom.volumenstromSlider.min = Math.round(volVal * 0.5 / 100) * 100;
+            dom.volumenstromSlider.max = Math.round(volVal * 1.5 / 100) * 100;
+        }
+        
         syncSliderToInput(dom.volumenstromSlider, dom.volumenstrom, dom.volumenstromLabel);
         syncSliderToInput(dom.tempZuluftSlider, dom.tempZuluft, dom.tempZuluftLabel, true);
         syncSliderToInput(dom.rhZuluftSlider, dom.rhZuluft, dom.rhZuluftLabel, true);
@@ -260,72 +267,58 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncSliderToInput(slider, input, label, isFloat = false) {
         const newValue = parseFloat(input.value);
         if(isNaN(newValue)) return;
-
-        if (input.id === 'volumenstrom') {
-            slider.min = Math.round(newValue * 0.5 / 100) * 100;
-            slider.max = Math.round(newValue * 1.5 / 100) * 100;
-        }
-        if (input.id === 'tempZuluft') {
-            slider.min = newValue - 6;
-            slider.max = newValue + 6;
-        }
-
         slider.value = newValue;
         label.textContent = isFloat ? newValue.toFixed(1) : newValue;
     }
 
-    function updateCostDependencies(changedId) {
+    function updateCostDependencies(basis) {
         const strom = parseFloat(dom.preisStrom.value);
         const eer = parseFloat(dom.eer.value);
         const kaelte = parseFloat(dom.preisKaelte.value);
 
-        if(changedId === 'preisStrom' || changedId === 'eer') {
-            if(!isNaN(strom) && !isNaN(eer) && eer > 0) {
-                dom.preisKaelte.value = (strom / eer).toFixed(3);
-            }
-        } else if (changedId === 'preisKaelte') {
-            if(!isNaN(strom) && !isNaN(kaelte) && kaelte > 0) {
-                dom.eer.value = (strom / kaelte).toFixed(2);
-            }
+        dom.preisStrom.readOnly = (basis === 'kaelte_eer');
+        dom.eer.readOnly = false; // EER is never calculated in the new logic
+        dom.preisKaelte.readOnly = (basis === 'strom_eer');
+
+        if (basis === 'strom_eer') {
+            if(!isNaN(strom) && !isNaN(eer) && eer > 0) dom.preisKaelte.value = (strom / eer).toFixed(3);
+        } else if (basis === 'kaelte_eer') {
+            if(!isNaN(kaelte) && !isNaN(eer) && eer > 0) dom.preisStrom.value = (kaelte * eer).toFixed(3);
         }
+        calculateAll();
     }
     
-    // --- INITIALIZATION ---
     function addEventListeners() {
-        const simpleInputs = [ dom.tempAussen, dom.rhAussen, dom.druck, dom.xZuluft, dom.tempHeizVorlauf, dom.tempHeizRuecklauf, dom.tempKuehlVorlauf, dom.tempKuehlRuecklauf ];
-        simpleInputs.forEach(input => input.addEventListener('input', calculateAll));
-
-        const costInputs = [dom.preisWaerme, dom.preisStrom, dom.eer, dom.preisKaelte];
-        costInputs.forEach(input => input.addEventListener('input', (e) => {
-            updateCostDependencies(e.target.id);
-            calculateAll();
-        }));
-        
-        const syncedInputs = [dom.volumenstrom, dom.tempZuluft, dom.rhZuluft];
-        syncedInputs.forEach(input => input.addEventListener('input', () => { syncAllSlidersToInputs(); calculateAll(); }));
-        
-        const sliders = [dom.volumenstromSlider, dom.tempZuluftSlider, dom.rhZuluftSlider];
-        sliders.forEach(slider => slider.addEventListener('input', () => {
-            const inputId = slider.id.replace('Slider', '');
-            const isFloat = inputId !== 'volumenstrom';
-            const value = isFloat ? parseFloat(slider.value).toFixed(1) : slider.value;
-            dom[inputId].value = value;
-            dom[inputId+'Label'].textContent = value;
-            calculateAll();
-        }));
-
-        dom.kuehlerAktiv.addEventListener('change', () => { handleKuehlerToggle(); calculateAll(); });
-        dom.feuchteSollTyp.addEventListener('change', () => { handleKuehlerToggle(); calculateAll(); });
-        dom.kuehlmodus.addEventListener('change', () => { handleKuehlerToggle(); calculateAll(); });
-        
+        const allInputs = document.querySelectorAll('input[type=number], select, input[type=checkbox]');
+        allInputs.forEach(input => {
+            input.addEventListener('input', masterUpdate);
+            input.addEventListener('change', masterUpdate);
+        });
         dom.resetBtn.addEventListener('click', resetToDefaults);
         dom.resetSlidersBtn.addEventListener('click', resetSlidersToRef);
         dom.setReferenceBtn.addEventListener('click', handleSetReference);
     }
 
+    function masterUpdate(event) {
+        const el = event.target;
+        switch(el.type) {
+            case 'number':
+            case 'range':
+                syncAllSlidersToInputs();
+                break;
+            case 'checkbox':
+            case 'select-one':
+                handleKuehlerToggle();
+                break;
+        }
+        if (el.name === 'kaeltebasis') {
+            updateCostDependencies(el.value);
+        } else {
+            calculateAll();
+        }
+    }
+
     addEventListeners();
     handleKuehlerToggle();
-    updateCostDependencies('eer'); // Initial calculation
-    syncAllSlidersToInputs();
-    calculateAll();
+    updateCostDependencies(document.querySelector('input[name="kaeltebasis"]:checked').value);
 });
