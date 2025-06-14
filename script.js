@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let referenceState = null;
     let currentTotalCost = 0;
 
+    // Cache all DOM elements once for performance and clarity
     const dom = {
         tempAussen: document.getElementById('tempAussen'), rhAussen: document.getElementById('rhAussen'),
         tempZuluft: document.getElementById('tempZuluft'), rhZuluft: document.getElementById('rhZuluft'),
@@ -191,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function updateStateNode(node, state, colorClass, isInactive = false) {
         node.className = 'state-node';
-        if (colorClass) node.classList.add(colorClass);
+        node.classList.add(colorClass);
         if (isInactive) node.classList.add('inactive');
         if(node.id === 'node-final') node.classList.add('final-state');
         
@@ -253,28 +254,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function syncAllSlidersToInputs(){
-        const tempVal = parseFloat(dom.tempZuluft.value);
-        if(!isNaN(tempVal)) {
-            dom.tempZuluftSlider.min = tempVal - 6;
-            dom.tempZuluftSlider.max = tempVal + 6;
-        }
-        const volVal = parseFloat(dom.volumenstrom.value);
-        if(!isNaN(volVal)) {
-            dom.volumenstromSlider.min = Math.round(volVal * 0.5 / 100) * 100;
-            dom.volumenstromSlider.max = Math.round(volVal * 1.5 / 100) * 100;
-        }
-        syncSliderToInput(dom.volumenstromSlider, dom.volumenstrom, dom.volumenstromLabel);
-        syncSliderToInput(dom.tempZuluftSlider, dom.tempZuluft, dom.tempZuluftLabel, true);
-        syncSliderToInput(dom.rhZuluftSlider, dom.rhZuluft, dom.rhZuluftLabel, true);
+        syncSliderToInput(dom.volumenstrom, dom.volumenstromSlider, dom.volumenstromLabel);
+        syncSliderToInput(dom.tempZuluft, dom.tempZuluftSlider, dom.tempZuluftLabel, true);
+        syncSliderToInput(dom.rhZuluft, dom.rhZuluftSlider, dom.rhZuluftLabel, true);
     }
-    function syncSliderToInput(slider, input, label, isFloat = false) {
+    function syncSliderToInput(input, slider, label, isFloat = false) {
         const newValue = parseFloat(input.value);
         if(isNaN(newValue)) return;
+        if (input.id === 'volumenstrom') {
+            slider.min = Math.round(newValue * 0.5 / 100) * 100;
+            slider.max = Math.round(newValue * 1.5 / 100) * 100;
+        }
+        if (input.id === 'tempZuluft') {
+            slider.min = (newValue - 6).toFixed(1);
+            slider.max = (newValue + 6).toFixed(1);
+        }
         slider.value = newValue;
         label.textContent = isFloat ? newValue.toFixed(1) : newValue;
     }
 
-    function updateCostDependencies(basis) {
+    function updateCostDependencies() {
+        const basis = document.querySelector('input[name="kaeltebasis"]:checked').value;
         const strom = parseFloat(dom.preisStrom.value);
         const eer = parseFloat(dom.eer.value);
         const kaelte = parseFloat(dom.preisKaelte.value);
@@ -291,25 +291,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // --- INITIALIZATION ---
     function addEventListeners() {
-        const numberAndSelectInputs = [
-            dom.tempAussen, dom.rhAussen, dom.druck, dom.preisWaerme, dom.xZuluft, 
-            dom.tempHeizVorlauf, dom.tempHeizRuecklauf, dom.tempKuehlVorlauf, dom.tempKuehlRuecklauf,
-            dom.volumenstrom, dom.tempZuluft, dom.rhZuluft,
-            dom.kuehlerAktiv, dom.feuchteSollTyp, dom.kuehlmodus,
-        ];
-        numberAndSelectInputs.forEach(input => {
-            input.addEventListener('input', calculateAll);
-            input.addEventListener('change', calculateAll);
-        });
+        // Simple inputs trigger calculation
+        const simpleInputs = [ dom.tempAussen, dom.rhAussen, dom.druck, dom.preisWaerme, dom.xZuluft, dom.tempHeizVorlauf, dom.tempHeizRuecklauf, dom.tempKuehlVorlauf, dom.tempKuehlRuecklauf ];
+        simpleInputs.forEach(input => input.addEventListener('input', calculateAll));
 
-        const costDepInputs = [dom.preisStrom, dom.eer, dom.preisKaelte];
-        costDepInputs.forEach(input => input.addEventListener('input', () => {
-            const basis = document.querySelector('input[name="kaeltebasis"]:checked').value;
-            updateCostDependencies(basis);
-            calculateAll();
-        }));
-        dom.kaelteBasisInputs.forEach(radio => radio.addEventListener('change', (e) => updateCostDependencies(e.target.value)));
-
+        // Synced inputs update sliders and calculate
+        const syncedInputs = [dom.volumenstrom, dom.tempZuluft, dom.rhZuluft];
+        syncedInputs.forEach(input => input.addEventListener('input', () => { syncAllSlidersToInputs(); calculateAll(); }));
+        
         const sliders = [dom.volumenstromSlider, dom.tempZuluftSlider, dom.rhZuluftSlider];
         sliders.forEach(slider => {
             slider.addEventListener('input', () => {
@@ -317,11 +306,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isFloat = inputId !== 'volumenstrom';
                 const value = isFloat ? parseFloat(slider.value).toFixed(1) : slider.value;
                 dom[inputId].value = value;
-                syncAllSlidersToInputs();
+                dom[inputId+'Label'].textContent = value;
                 calculateAll();
             });
         });
 
+        // Cost dependency inputs have their own logic
+        const costDepInputs = [dom.preisStrom, dom.eer, dom.preisKaelte];
+        costDepInputs.forEach(input => input.addEventListener('input', () => { updateCostDependencies(); calculateAll(); }));
+        dom.kaelteBasisInputs.forEach(radio => radio.addEventListener('change', () => { updateCostDependencies(); calculateAll(); }));
+
+        // Toggles and Selects also have their own handlers
+        dom.kuehlerAktiv.addEventListener('change', () => { handleKuehlerToggle(); calculateAll(); });
+        dom.feuchteSollTyp.addEventListener('change', () => { handleKuehlerToggle(); calculateAll(); });
+        dom.kuehlmodus.addEventListener('change', () => { handleKuehlerToggle(); calculateAll(); });
+        
+        // Buttons
         dom.resetBtn.addEventListener('click', resetToDefaults);
         dom.resetSlidersBtn.addEventListener('click', resetSlidersToRef);
         dom.setReferenceBtn.addEventListener('click', handleSetReference);
@@ -329,7 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     addEventListeners();
     handleKuehlerToggle();
-    updateCostDependencies(document.querySelector('input[name="kaeltebasis"]:checked').value);
+    updateCostDependencies();
     syncAllSlidersToInputs();
     calculateAll();
 });
