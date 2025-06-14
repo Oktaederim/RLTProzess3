@@ -131,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const startState = states[0];
         let colors = ['color-green', 'color-green', 'color-green', 'color-green'];
 
-        if (operations.ve.p > 0) colors[1] = 'color-red';
+        colors[1] = operations.ve.p > 0 ? 'color-red' : colors[0];
         colors[2] = operations.k.p > 0 ? 'color-blue' : colors[1];
         colors[3] = operations.ne.p > 0 ? 'color-red' : colors[2];
         const finalColor = finalState.t < startState.t - TOLERANCE ? 'color-blue' : (finalState.t > startState.t + TOLERANCE ? 'color-red' : 'color-green');
@@ -233,6 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
         syncAllSlidersToInputs();
         handleKuehlerToggle();
         updateCostDependencies('strom_eer');
+        calculateAll();
     }
     
     function resetSlidersToRef() {
@@ -250,7 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isDehumidify = dom.kuehlmodus.value === 'dehumidify';
         dom.sollFeuchteWrapper.style.display = isActive && isDehumidify ? 'block' : 'none';
     }
-    
+
     function syncAllSlidersToInputs(){
         const tempVal = parseFloat(dom.tempZuluft.value);
         if(!isNaN(tempVal)) {
@@ -288,18 +289,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
+    // --- INITIALIZATION ---
     function addEventListeners() {
-        const numberAndSelectInputs = document.querySelectorAll('input[type=number], select');
+        const numberAndSelectInputs = [
+            dom.tempAussen, dom.rhAussen, dom.druck, dom.preisWaerme, dom.xZuluft, 
+            dom.tempHeizVorlauf, dom.tempHeizRuecklauf, dom.tempKuehlVorlauf, dom.tempKuehlRuecklauf,
+            dom.volumenstrom, dom.tempZuluft, dom.rhZuluft,
+            dom.kuehlerAktiv, dom.feuchteSollTyp, dom.kuehlmodus,
+        ];
         numberAndSelectInputs.forEach(input => {
-            input.addEventListener('input', () => {
-                if(input.name === 'kaeltebasis') {
-                    updateCostDependencies(input.value);
-                }
-                syncAllSlidersToInputs();
-                handleKuehlerToggle();
-                calculateAll();
-            });
+            input.addEventListener('input', calculateAll);
+            input.addEventListener('change', calculateAll);
         });
+
+        const costDepInputs = [dom.preisStrom, dom.eer, dom.preisKaelte];
+        costDepInputs.forEach(input => input.addEventListener('input', () => {
+            const basis = document.querySelector('input[name="kaeltebasis"]:checked').value;
+            updateCostDependencies(basis);
+            calculateAll();
+        }));
+        dom.kaelteBasisInputs.forEach(radio => radio.addEventListener('change', (e) => updateCostDependencies(e.target.value)));
 
         const sliders = [dom.volumenstromSlider, dom.tempZuluftSlider, dom.rhZuluftSlider];
         sliders.forEach(slider => {
@@ -308,18 +317,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isFloat = inputId !== 'volumenstrom';
                 const value = isFloat ? parseFloat(slider.value).toFixed(1) : slider.value;
                 dom[inputId].value = value;
-                dom[inputId+'Label'].textContent = value;
+                syncAllSlidersToInputs();
                 calculateAll();
             });
         });
-        
-        dom.kaelteBasisInputs.forEach(radio => radio.addEventListener('change', (e) => {
-            updateCostDependencies(e.target.value);
-            calculateAll();
-        }));
-        
-        dom.kuehlerAktiv.addEventListener('change', () => { handleKuehlerToggle(); calculateAll(); });
-        
+
         dom.resetBtn.addEventListener('click', resetToDefaults);
         dom.resetSlidersBtn.addEventListener('click', resetSlidersToRef);
         dom.setReferenceBtn.addEventListener('click', handleSetReference);
